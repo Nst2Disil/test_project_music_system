@@ -3,17 +3,23 @@ import queue
 import subprocess
 import os
 import shutil
+import telebot
+from dotenv import load_dotenv
+
+load_dotenv()
+token = os.getenv('TOKEN')
+bot = telebot.TeleBot(token)
+
+INPUT_PATH = 'oemer_input'
+OUTPUT_PATH = 'oemer_results'
+
+if not os.path.exists(INPUT_PATH):
+    os.makedirs(INPUT_PATH)
+if not os.path.exists(OUTPUT_PATH):
+    os.makedirs(OUTPUT_PATH)
 
 # Создаем очередь для ввода пользователя
 input_queue = queue.Queue()
-
-# Список папок для вывода
-output_dirs = ['output1', 'output2', 'output3']
-
-# Убедитесь, что папки для вывода существуют
-for output_dir in output_dirs:
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
 
 # Состояние процессов (True, если процесс занят, иначе False)
 process_states = [False, False, False]
@@ -21,8 +27,32 @@ process_states = [False, False, False]
 # Блокировка для защиты доступа к process_states
 lock = threading.Lock()
 
+@bot.message_handler(commands=['start'])
+def main(message): 
+    bot.send_message(message.chat.id, 'привет')
+
+@bot.message_handler(content_types=['photo'])
+def get_photo(message):
+    # идентификатор фотографии
+    file_id = message.photo[-1].file_id
+    # путь к фотографии в Tg
+    tg_path = bot.get_file(file_id).file_path
+
+    # Сохранение изображения
+    downloaded_file = bot.download_file(tg_path)
+    file_name = str(message.chat.id) + ".jpg"
+    img_path = os.path.join(INPUT_PATH, file_name)
+    with open(img_path, 'wb') as new_file:
+        new_file.write(downloaded_file)
+
+    # Помещаем путь изображения и ID пользователя в очередь
+    output_dir = os.path.join(OUTPUT_PATH, str(message.chat.id))
+    input_queue.put((img_path, output_dir))
+
 # Функция для очистки выходной папки
 def clear_output_dir(output_dir):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     for filename in os.listdir(output_dir):
         file_path = os.path.join(output_dir, filename)
         try:
@@ -49,25 +79,19 @@ def run_docker(img_path, output_dir):
         print(f"Error: {stderr.decode('utf-8')}")
     return docker_process
 
-# Функция для обработки ввода пользователя
-def process_input():
-    while True:
-        img_path = input("Введите путь к изображению: ")
-        input_queue.put(img_path)
-
 # Функция для распределения изображений по процессам и запуска потоков
 def round_robin_runner():
     print(process_states)
     process_index = 0
     while True:
-        img_path = input_queue.get()
+        img_path, output_dir = input_queue.get()
         assigned = False
 
         while not assigned:
             with lock:
                 if not process_states[process_index]:
                     process_states[process_index] = True
-                    threading.Thread(target=process_runner, args=(img_path, output_dirs[process_index], process_index)).start()
+                    threading.Thread(target=process_runner, args=(img_path, output_dir, process_index)).start()
                     assigned = True
                     print(process_states)
                 else:
@@ -85,8 +109,7 @@ def process_runner(img_path, output_dir, index):
     with lock:
         process_states[index] = False
 
-# Запускаем поток для обработки ввода пользователя
-threading.Thread(target=process_input, daemon=True).start()
+# Запускаем функцию распределения процессов в отдельном потоке
+threading.Thread(target=round_robin_runner, daemon=True).start()
 
-# Запускаем функцию распределения процессов
-round_robin_runner()
+bot.polling(non_stop=True)
