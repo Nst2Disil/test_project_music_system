@@ -66,7 +66,7 @@ def clear_output_dir(output_dir):
 # Функция для запуска Docker-контейнера
 def run_docker(img_path, output_dir):
     command = [
-        "docker", "run", "--rm", "-d", 
+        "docker", "run", "--rm",
         "-v", f"{os.path.abspath(img_path)}:/input_image", 
         "-v", f"{os.path.abspath(output_dir)}:/output_dir", 
         "oemer_image", 
