@@ -47,7 +47,7 @@ def get_photo(message):
 
     # Помещаем путь изображения и ID пользователя в очередь
     output_dir = os.path.join(OUTPUT_PATH, str(message.chat.id))
-    input_queue.put((img_path, output_dir))
+    input_queue.put((img_path, output_dir, message.chat.id))
 
 # Функция для очистки выходной папки
 def clear_output_dir(output_dir):
@@ -64,13 +64,13 @@ def clear_output_dir(output_dir):
             print(f'Failed to delete {file_path}. Reason: {e}')
 
 # Функция для запуска Docker-контейнера
-def run_docker(img_path, output_dir):
+def run_docker(img_path, output_dir, user_id):
     command = [
         "docker", "run", "--rm",
-        "-v", f"{os.path.abspath(img_path)}:/input_image", 
+        "-v", f"{os.path.abspath(img_path)}:/{user_id}.jpg", 
         "-v", f"{os.path.abspath(output_dir)}:/output_dir", 
         "oemer_image", 
-        "-o", "/output_dir", "/input_image"
+        "-o", f"/output_dir", f"/{user_id}.jpg"
     ]
     print(command)
     docker_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -84,14 +84,14 @@ def round_robin_runner():
     print(process_states)
     process_index = 0
     while True:
-        img_path, output_dir = input_queue.get()
+        img_path, output_dir, user_id = input_queue.get()
         assigned = False
 
         while not assigned:
             with lock:
                 if not process_states[process_index]:
                     process_states[process_index] = True
-                    threading.Thread(target=process_runner, args=(img_path, output_dir, process_index)).start()
+                    threading.Thread(target=process_runner, args=(img_path, output_dir, process_index, user_id)).start()
                     assigned = True
                     print(process_states)
                 else:
@@ -103,9 +103,9 @@ def round_robin_runner():
             process_index = (process_index + 1) % len(process_states)
 
 # Функция для запуска процесса и обновления состояния
-def process_runner(img_path, output_dir, index):
+def process_runner(img_path, output_dir, index, user_id):
     clear_output_dir(output_dir)  # Очистка выходной папки перед запуском контейнера
-    run_docker(img_path, output_dir)
+    run_docker(img_path, output_dir, user_id)
     with lock:
         process_states[index] = False
 
